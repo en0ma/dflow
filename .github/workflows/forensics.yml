@@ -41,12 +41,12 @@ jobs:
       - name: Compile check
         run: python -m py_compile analyze.py
 
-      - name: Run Solana forensic collector
-        run: python analyze.py --targets targets.json --out-dir reports
-
       - name: Probe DFlow open-order ABI
         run: python probe_api.py
         continue-on-error: true
+
+      - name: Run Solana forensic collector
+        run: python analyze.py --targets targets.json --out-dir reports
 
       - name: Upload evidence bundle
         if: always()
