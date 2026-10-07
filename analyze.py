@@ -281,6 +281,107 @@ def parsed_instruction_event(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+
+def raw_instruction_dump(tx: dict[str, Any]) -> dict[str, Any]:
+    msg = tx.get("transaction", {}).get("message", {}) or {}
+    key_details = msg.get("accountKeys", []) or []
+
+    def enrich(ix: dict[str, Any]) -> dict[str, Any]:
+        by_pk = {}
+        for k in key_details:
+            if isinstance(k, dict) and k.get("pubkey"):
+                by_pk[k["pubkey"]] = {
+                    "pubkey": k.get("pubkey"),
+                    "signer": bool(k.get("signer")),
+                    "writable": bool(k.get("writable")),
+                    "source": k.get("source"),
+                }
+        accounts = []
+        for a in ix.get("accounts") or []:
+            if isinstance(a, str):
+                accounts.append(by_pk.get(a, {"pubkey": a}))
+            elif isinstance(a, dict):
+                pk = a.get("pubkey")
+                base = by_pk.get(pk, {"pubkey": pk}) if pk else {}
+                accounts.append({**base, **a})
+            else:
+                accounts.append({"value": a})
+        return {
+            "programId": ix.get("programId"),
+            "program": ix.get("program"),
+            "accounts": accounts,
+            "data": ix.get("data"),
+            "parsed": ix.get("parsed"),
+            "stackHeight": ix.get("stackHeight"),
+        }
+
+    return {
+        "header": msg.get("header"),
+        "accountKeys": key_details,
+        "signatures": tx.get("transaction", {}).get("signatures", []),
+        "outerInstructions": [
+            {"index": i, **enrich(ix)}
+            for i, ix in enumerate(msg.get("instructions", []) or [])
+        ],
+        "innerInstructionGroups": [
+            {
+                "outerIndex": g.get("index"),
+                "instructions": [
+                    {"innerIndex": j, **enrich(ix)}
+                    for j, ix in enumerate(g.get("instructions", []) or [])
+                ],
+            }
+            for g in (tx.get("meta", {}).get("innerInstructions") or [])
+        ],
+        "logMessages": tx.get("meta", {}).get("logMessages", []),
+        "preBalances": tx.get("meta", {}).get("preBalances", []),
+        "postBalances": tx.get("meta", {}).get("postBalances", []),
+        "preTokenBalances": tx.get("meta", {}).get("preTokenBalances", []),
+        "postTokenBalances": tx.get("meta", {}).get("postTokenBalances", []),
+        "loadedAddresses": tx.get("meta", {}).get("loadedAddresses"),
+        "fee": tx.get("meta", {}).get("fee"),
+        "err": tx.get("meta", {}).get("err"),
+        "computeUnitsConsumed": tx.get("meta", {}).get("computeUnitsConsumed"),
+    }
+
+
+def raw_compiled_dump(raw_tx: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not raw_tx:
+        return None
+    msg = raw_tx.get("transaction", {}).get("message", {}) or {}
+    keys = msg.get("accountKeys", []) or []
+    loaded = raw_tx.get("meta", {}).get("loadedAddresses") or {}
+    full_keys = list(keys) + list(loaded.get("writable") or []) + list(loaded.get("readonly") or [])
+
+    def norm(ix: dict[str, Any]) -> dict[str, Any]:
+        pidx = ix.get("programIdIndex")
+        account_indexes = ix.get("accounts") or []
+        return {
+            "programIdIndex": pidx,
+            "programId": full_keys[pidx] if isinstance(pidx, int) and pidx < len(full_keys) else None,
+            "accountIndexes": account_indexes,
+            "accounts": [
+                full_keys[i] if isinstance(i, int) and i < len(full_keys) else None
+                for i in account_indexes
+            ],
+            "dataBase58": ix.get("data"),
+            "stackHeight": ix.get("stackHeight"),
+        }
+
+    return {
+        "accountKeys": keys,
+        "loadedAddresses": loaded,
+        "outerInstructions": [norm(ix) for ix in (msg.get("instructions") or [])],
+        "innerInstructionGroups": [
+            {
+                "outerIndex": g.get("index"),
+                "instructions": [norm(ix) for ix in (g.get("instructions") or [])],
+            }
+            for g in (raw_tx.get("meta", {}).get("innerInstructions") or [])
+        ],
+    }
+
+
 def summarize_transaction(signature: str, tx: dict[str, Any] | None) -> dict[str, Any]:
     if tx is None:
         return {"signature": signature, "available": False}
