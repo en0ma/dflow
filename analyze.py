@@ -308,6 +308,7 @@ def summarize_transaction(signature: str, tx: dict[str, Any] | None) -> dict[str
         "transactionSignatures": tx.get("transaction", {}).get("signatures", []),
         "logMessages": tx.get("meta", {}).get("logMessages", []),
         "innerInstructionsRaw": tx.get("meta", {}).get("innerInstructions", []),
+        "wireDump": raw_instruction_dump(tx),
         "programIds": [
             {"address": p, "name": KNOWN_PROGRAMS.get(p)}
             for p in sorted(all_programs)
@@ -599,6 +600,7 @@ def main() -> int:
             open_candidates = [{"error": str(exc)}]
 
     explicit = []
+    wire_dumps = {}
     for signature in cfg.get("evidenceTransactions", []):
         print(f"Decoding evidence transaction {signature}", flush=True)
         try:
