@@ -303,6 +303,11 @@ def summarize_transaction(signature: str, tx: dict[str, Any] | None) -> dict[str
         "err": tx.get("meta", {}).get("err"),
         "fee": tx.get("meta", {}).get("fee"),
         "accountKeys": keys,
+        "messageHeader": tx.get("transaction", {}).get("message", {}).get("header"),
+        "accountKeyDetails": tx.get("transaction", {}).get("message", {}).get("accountKeys", []),
+        "transactionSignatures": tx.get("transaction", {}).get("signatures", []),
+        "logMessages": tx.get("meta", {}).get("logMessages", []),
+        "innerInstructionsRaw": tx.get("meta", {}).get("innerInstructions", []),
         "programIds": [
             {"address": p, "name": KNOWN_PROGRAMS.get(p)}
             for p in sorted(all_programs)
