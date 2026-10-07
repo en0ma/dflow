@@ -237,6 +237,23 @@ def summarize_transaction(signature: str, tx: dict[str, Any] | None) -> dict[str
         p for p in parsed_events
         if p.get("programId") in TOKEN_PROGRAMS and p.get("type") in INTERESTING_TOKEN_TYPES
     ]
+
+    # Preserve the raw outer instruction envelope for custom programs. For
+    # jsonParsed transactions, custom program instructions remain encoded as
+    # base58 data + account pubkeys, which is exactly what we need to identify
+    # the first on-chain program hit and its wire payload.
+    outer_raw = []
+    for index, ix in enumerate(tx.get("transaction", {}).get("message", {}).get("instructions", []) or []):
+        outer_raw.append({
+            "index": index,
+            "programId": ix.get("programId"),
+            "programName": KNOWN_PROGRAMS.get(ix.get("programId")) or ix.get("program"),
+            "accounts": ix.get("accounts"),
+            "data": ix.get("data"),
+            "parsed": ix.get("parsed"),
+            "stackHeight": ix.get("stackHeight"),
+        })
+
     return {
         "signature": signature,
         "available": True,
@@ -251,6 +268,7 @@ def summarize_transaction(signature: str, tx: dict[str, Any] | None) -> dict[str
         ],
         "parsedInstructions": parsed_events,
         "interestingTokenInstructions": token_events,
+        "outerInstructions": outer_raw,
         "preTokenBalances": tx.get("meta", {}).get("preTokenBalances"),
         "postTokenBalances": tx.get("meta", {}).get("postTokenBalances"),
     }
