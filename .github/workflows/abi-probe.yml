@@ -1,0 +1,24 @@
+name: DFlow ABI probe
+on:
+  push:
+    paths:
+      - probe_api.py
+      - .github/workflows/abi-probe.yml
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate unsigned quote diffs
+        run: python probe_api.py
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: dflow-abi-probe-${{ github.run_id }}
+          path: reports/api-probe.json
