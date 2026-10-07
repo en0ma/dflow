@@ -45,6 +45,13 @@ jobs:
         run: python probe_api.py
         continue-on-error: true
 
+      - name: Upload ABI probe result
+        uses: actions/upload-artifact@v4
+        with:
+          name: dflow-abi-probe-${{ github.run_id }}
+          path: reports/api-probe.json
+          if-no-files-found: warn
+
       - name: Run Solana forensic collector
         run: python analyze.py --targets targets.json --out-dir reports
 
