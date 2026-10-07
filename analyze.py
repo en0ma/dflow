@@ -856,16 +856,25 @@ def main() -> int:
         except Exception as exc:
             open_candidates = [{"error": str(exc)}]
 
-    initialized_market_orders = []
-    try:
-        initialized_market_orders = find_initialized_market_orders(
-            rpc,
+    initialized_market_orders = {}
+    for market_name, ledger, init_sig in [
+        (
+            "TIE",
             "GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX",
             "4HG2x8c9XgRBUCjprDo1EVKZfqC6tXziYi3dmmCTEFVbtoEh6C1tW8cV7m4tmZKPFJceT2UeCyTUAo7Goc9fRG5Y",
-            200,
-        )
-    except Exception as exc:
-        initialized_market_orders = [{"error": str(exc)}]
+        ),
+        (
+            "ARS",
+            "ERm2CMDxUJduckmBkZU28SBzzGycZzcdUbiRmzqRaoA",
+            "5PdqsoBjzgv9s7A59Hft5FL8ZUGU4Diq3qgtWHykbvZdDZ9BWu18dusj5QPHQtaXGkAdNeXtGhiFahnKtku7tXb9",
+        ),
+    ]:
+        try:
+            initialized_market_orders[market_name] = find_initialized_market_orders(
+                rpc, ledger, init_sig, 200
+            )
+        except Exception as exc:
+            initialized_market_orders[market_name] = [{"error": str(exc)}]
 
     explicit = []
     wire_dumps = {}
