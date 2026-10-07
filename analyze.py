@@ -33,7 +33,7 @@ TOKEN_PROGRAMS = {
 KNOWN_PROGRAMS = {
     "11111111111111111111111111111111": "System Program",
     "ComputeBudget111111111111111111111111111111": "Compute Budget",
-    "ATokenGPvbdGVxr1h5T6WQwYd6gNqM5f2r4R7uFh7b1": "Associated Token Program",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": "Associated Token Program",
     **TOKEN_PROGRAMS,
 }
 
@@ -181,6 +181,20 @@ def find_user_open_candidates(rpc: Rpc, wallet: str, usdc_account: str, before_s
                 "postTokenBalances": summary.get("postTokenBalances"),
             })
     return out
+
+def get_transaction_resilient(rpc: Rpc, signature: str, raw: bool = False, attempts: int = 12) -> dict[str, Any] | None:
+    fn = get_transaction_raw if raw else get_transaction
+    last = None
+    for i in range(attempts):
+        try:
+            last = fn(rpc, signature)
+            if last is not None:
+                return last
+        except Exception:
+            if i == attempts - 1:
+                raise
+        time.sleep(min(1 + i, 5))
+    return last
 
 def get_transaction_raw(rpc: Rpc, signature: str) -> dict[str, Any] | None:
     return rpc.call("getTransaction", [
@@ -614,15 +628,26 @@ def main() -> int:
     for signature in cfg.get("evidenceTransactions", []):
         print(f"Decoding evidence transaction {signature}", flush=True)
         try:
-            explicit.append(summarize_transaction(signature, get_transaction(rpc, signature)))
+            parsed_tx = get_transaction_resilient(rpc, signature, raw=False)
+            if parsed_tx is None:
+                explicit.append({"signature": signature, "available": False, "error": "RPC returned null after retries"})
+                continue
+            s = summarize_transaction(signature, parsed_tx)
+            raw_tx = get_transaction_resilient(rpc, signature, raw=True)
+            s["rawCompiled"] = raw_compiled_dump(raw_tx)
+            explicit.append(s)
+            wire_dumps[signature] = {
+                "parsed": s.get("wireDump"),
+                "rawCompiled": s.get("rawCompiled"),
+            }
         except Exception as exc:
             explicit.append({"signature": signature, "available": False, "error": str(exc)})
 
     if cfg.get("evidenceTransactions"):
-        available_explicit = [x for x in explicit if x and x.get("available", True)]
+        available_explicit = [x for x in explicit if x and x.get("available") is True]
         if not available_explicit:
             raise RuntimeError(
-                "All known historical evidence transactions were unavailable from RPC; refusing to emit false-negative report"
+                "All known historical evidence transactions were unavailable from RPC after retries; refusing to emit false-negative report"
             )
 
     report = {
@@ -631,6 +656,7 @@ def main() -> int:
         "evidenceTransactions": explicit,
         "openOrderCandidates": open_candidates,
     }
+    (out_dir / "wire-transactions.json").write_text(json.dumps(wire_dumps, indent=2, sort_keys=False))
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
     md = render_markdown(report)
     (out_dir / "report.md").write_text(md)
