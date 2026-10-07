@@ -436,7 +436,7 @@ def main() -> int:
     p.add_argument("--scan-limit", type=int, default=int(os.getenv("SCAN_TX_LIMIT", "1000")))
     args = p.parse_args()
 
-    rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    rpc_url = os.getenv("SOLANA_RPC_URL") or "https://api.mainnet-beta.solana.com"
     rpc = Rpc(rpc_url)
 
     cfg = json.loads(Path(args.targets).read_text())
@@ -468,7 +468,7 @@ def main() -> int:
             explicit.append({"signature": signature, "available": False, "error": str(exc)})
 
     report = {
-        "rpcDisplay": "SOLANA_RPC_URL" if os.getenv("SOLANA_RPC_URL") else "public mainnet-beta RPC",
+        "rpcDisplay": "SOLANA_RPC_URL" if (os.getenv("SOLANA_RPC_URL") or "").strip() else "public mainnet-beta RPC",
         "targets": targets,
         "evidenceTransactions": explicit,
     }
