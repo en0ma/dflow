@@ -1,0 +1,54 @@
+name: DFlow on-chain forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_signature_pages:
+        description: "1000 signatures/page; increase when using an archival RPC"
+        required: false
+        default: "10"
+      scan_tx_limit:
+        description: "Oldest transactions per account to decode for mint/burn evidence"
+        required: false
+        default: "1000"
+  schedule:
+    - cron: "17 7 * * 1"
+  push:
+    paths:
+      - "analyze.py"
+      - "targets.json"
+      - ".github/workflows/forensics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      MAX_SIGNATURE_PAGES: ${{ inputs.max_signature_pages || '10' }}
+      SCAN_TX_LIMIT: ${{ inputs.scan_tx_limit || '1000' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile check
+        run: python -m py_compile analyze.py
+
+      - name: Run Solana forensic collector
+        run: python analyze.py --targets targets.json --out-dir reports
+
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dflow-solana-forensics-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 30
