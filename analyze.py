@@ -520,6 +520,66 @@ def main() -> int:
 
     open_candidates = []
     discovery = cfg.get("openOrderDiscovery") or {}
+
+    # Auto-infer the buyer from the latest evidence transaction when explicit
+    # discovery config is absent. We identify the owner of a token account
+    # whose balance increases from zero, then locate that same owner's stablecoin
+    # account in the transaction and scan backward from the fill signature.
+    if (not discovery.get("wallet") or not discovery.get("usdcAccount")) and cfg.get("evidenceTransactions"):
+        fill_sig = cfg["evidenceTransactions"][-1]
+        try:
+            fill_tx = get_transaction(rpc, fill_sig)
+            if fill_tx:
+                s = summarize_transaction(fill_sig, fill_tx)
+                pre = {b.get("accountIndex"): b for b in (s.get("preTokenBalances") or [])}
+                post = {b.get("accountIndex"): b for b in (s.get("postTokenBalances") or [])}
+                wallet = None
+                usdc_account = None
+
+                # Find the owner of an account that goes from absent/zero to nonzero.
+                for idx, pb in post.items():
+                    pre_amt = 0
+                    if idx in pre:
+                        try:
+                            pre_amt = int((pre[idx].get("uiTokenAmount") or {}).get("amount") or "0")
+                        except Exception:
+                            pre_amt = 0
+                    try:
+                        post_amt = int((pb.get("uiTokenAmount") or {}).get("amount") or "0")
+                    except Exception:
+                        post_amt = 0
+                    if post_amt > pre_amt and pb.get("owner"):
+                        wallet = pb.get("owner")
+                        break
+
+                # Among that owner's other token accounts in the fill tx, select
+                # the classic stablecoin-looking account: 6 decimals and unchanged
+                # balance across pre/post.
+                keys = s.get("accountKeys") or []
+                if wallet:
+                    for idx, pb in post.items():
+                        if pb.get("owner") != wallet:
+                            continue
+                        ui = pb.get("uiTokenAmount") or {}
+                        if ui.get("decimals") != 6:
+                            continue
+                        if idx in pre:
+                            pre_ui = pre[idx].get("uiTokenAmount") or {}
+                            if pre_ui.get("amount") == ui.get("amount"):
+                                if isinstance(idx, int) and idx < len(keys):
+                                    usdc_account = keys[idx]
+                                    break
+
+                if wallet and usdc_account:
+                    discovery = {
+                        "wallet": wallet,
+                        "usdcAccount": usdc_account,
+                        "beforeSignature": fill_sig,
+                        "limit": 200,
+                    }
+        except Exception as exc:
+            open_candidates = [{"error": f"fill inference failed: {exc}"}]
+
     if discovery.get("wallet") and discovery.get("usdcAccount"):
         print("Searching for user-signed open-order candidates", flush=True)
         try:
