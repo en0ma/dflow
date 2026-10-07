@@ -23,6 +23,14 @@
     {
       "label": "Tie-market NO mint candidate",
       "address": "7GA2eFoEupkSqJaeKrHgS516dipVDfmQ4ZQ2BFdZpdb3"
+    },
+    {
+      "label": "ARS NO order-state account",
+      "address": "EC9BVajMSBDrvC7SB6JA1FXMyPB2qGSUvRbdSfH3MnYh"
+    },
+    {
+      "label": "ARS YES order-state account",
+      "address": "63mfQcpeJYK3A5hgUAGhnMsXfAeCcqjJhFGDHdApiC5i"
     }
   ],
   "evidenceTransactions": [
