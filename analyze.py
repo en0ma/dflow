@@ -182,6 +182,16 @@ def find_user_open_candidates(rpc: Rpc, wallet: str, usdc_account: str, before_s
             })
     return out
 
+def get_transaction_raw(rpc: Rpc, signature: str) -> dict[str, Any] | None:
+    return rpc.call("getTransaction", [
+        signature,
+        {
+            "encoding": "json",
+            "commitment": "finalized",
+            "maxSupportedTransactionVersion": 0,
+        },
+    ])
+
 def get_transaction(rpc: Rpc, signature: str) -> dict[str, Any] | None:
     return rpc.call("getTransaction", [
         signature,
@@ -607,6 +617,13 @@ def main() -> int:
             explicit.append(summarize_transaction(signature, get_transaction(rpc, signature)))
         except Exception as exc:
             explicit.append({"signature": signature, "available": False, "error": str(exc)})
+
+    if cfg.get("evidenceTransactions"):
+        available_explicit = [x for x in explicit if x and x.get("available", True)]
+        if not available_explicit:
+            raise RuntimeError(
+                "All known historical evidence transactions were unavailable from RPC; refusing to emit false-negative report"
+            )
 
     report = {
         "rpcDisplay": "SOLANA_RPC_URL" if (os.getenv("SOLANA_RPC_URL") or "").strip() else "public mainnet-beta RPC",
