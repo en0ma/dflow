@@ -224,6 +224,96 @@ def find_user_open_candidates(rpc: Rpc, wallet: str, usdc_account: str, before_s
             })
     return out
 
+
+def get_transaction_base64(rpc: Rpc, signature: str) -> dict[str, Any] | None:
+    return rpc.call("getTransaction", [
+        signature,
+        {
+            "encoding": "base64",
+            "commitment": "finalized",
+            "maxSupportedTransactionVersion": 0,
+        },
+    ])
+
+
+def _read_shortvec(buf: bytes, off: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while True:
+        b = buf[off]
+        off += 1
+        value |= (b & 0x7f) << shift
+        if not (b & 0x80):
+            return value, off
+        shift += 7
+
+
+def mutate_legacy_or_v0_static_key(tx_bytes: bytes, old_pubkey_b58: str, new_pubkey_b58: str) -> bytes:
+    # Minimal Solana transaction parser sufficient to replace one static account key
+    # without altering message layout. Signature verification is disabled in simulation.
+    import base64 as _b64
+
+    ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    def b58decode(s: str) -> bytes:
+        n = 0
+        for ch in s:
+            n = n * 58 + ALPHABET.index(ch)
+        out = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
+        pad = len(s) - len(s.lstrip("1"))
+        return b"\x00" * pad + out
+
+    old = b58decode(old_pubkey_b58)
+    new = b58decode(new_pubkey_b58)
+    if len(old) != 32 or len(new) != 32:
+        raise ValueError("pubkeys must decode to 32 bytes")
+
+    buf = bytearray(tx_bytes)
+    sig_count, off = _read_shortvec(buf, 0)
+    off += sig_count * 64
+
+    # Versioned messages have 0x80|version prefix. Legacy messages start with header byte.
+    if buf[off] & 0x80:
+        off += 1
+
+    # message header = 3 bytes
+    off += 3
+    key_count, off = _read_shortvec(buf, off)
+
+    replaced = 0
+    for _ in range(key_count):
+        if bytes(buf[off:off+32]) == old:
+            buf[off:off+32] = new
+            replaced += 1
+        off += 32
+    if replaced != 1:
+        raise ValueError(f"expected to replace exactly one static key, replaced {replaced}")
+    return bytes(buf)
+
+
+def simulate_mutated_transaction(rpc: Rpc, signature: str, old_key: str, new_key: str) -> dict[str, Any]:
+    import base64
+    tx = get_transaction_base64(rpc, signature)
+    if not tx:
+        return {"error": "base64 transaction unavailable"}
+    raw_field = tx.get("transaction")
+    if not isinstance(raw_field, list) or not raw_field:
+        return {"error": "unexpected base64 transaction shape"}
+    raw = base64.b64decode(raw_field[0])
+    mutated = mutate_legacy_or_v0_static_key(raw, old_key, new_key)
+    encoded = base64.b64encode(mutated).decode()
+    result = rpc.call("simulateTransaction", [
+        encoded,
+        {
+            "encoding": "base64",
+            "sigVerify": False,
+            "replaceRecentBlockhash": True,
+            "commitment": "processed",
+            "innerInstructions": True,
+        },
+    ])
+    return result or {}
+
+
 def get_transaction_resilient(rpc: Rpc, signature: str, raw: bool = False, attempts: int = 12) -> dict[str, Any] | None:
     fn = get_transaction_raw if raw else get_transaction
     last = None
@@ -804,12 +894,34 @@ def main() -> int:
                 "All known historical evidence transactions were unavailable from RPC after retries; refusing to emit false-negative report"
             )
 
+    mutation_simulations = {}
+    established_sig = "4Y9mDkjoX1SkKgx1WTirQvJmecnyVUJvwScuGnWDwXKC3qHABKpLmXpbB7rYsLq2mWaF6Q5p5uLKB8iZyy1Dopea"
+    try:
+        mutation_simulations["ledger_swap_to_other_valid_dflow_ledger"] = simulate_mutated_transaction(
+            rpc,
+            established_sig,
+            "GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX",
+            "ERm2CMDxUJduckmBkZU28SBzzGycZzcdUbiRmzqRaoA",
+        )
+    except Exception as exc:
+        mutation_simulations["ledger_swap_to_other_valid_dflow_ledger"] = {"error": str(exc)}
+    try:
+        mutation_simulations["vault_swap_to_user_usdc_account"] = simulate_mutated_transaction(
+            rpc,
+            established_sig,
+            "6UThz4niGJi1CpuUgMHMqyYgQETKAYkyGDfTnYYnmHsb",
+            "7QYKHUXzHszXgJLoub3KSVZmAeK7fNRJxukwy7ug5Kn2",
+        )
+    except Exception as exc:
+        mutation_simulations["vault_swap_to_user_usdc_account"] = {"error": str(exc)}
+
     report = {
         "rpcDisplay": "SOLANA_RPC_URL" if (os.getenv("SOLANA_RPC_URL") or "").strip() else "public mainnet-beta RPC",
         "targets": targets,
         "evidenceTransactions": explicit,
         "openOrderCandidates": open_candidates,
         "initializedMarketOrders": initialized_market_orders,
+        "mutationSimulations": mutation_simulations,
     }
     (out_dir / "wire-transactions.json").write_text(json.dumps(wire_dumps, indent=2, sort_keys=False))
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
