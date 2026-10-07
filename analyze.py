@@ -142,6 +142,48 @@ def signatures_for_address(rpc: Rpc, address: str, max_pages: int) -> tuple[list
 
 
 
+
+def find_initialized_market_orders(rpc: Rpc, ledger: str, init_signature: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    sigs = rpc.call("getSignaturesForAddress", [
+        ledger,
+        {"limit": limit, "commitment": "finalized"},
+    ]) or []
+    out = []
+    for meta in sigs:
+        sig = meta.get("signature")
+        if not sig or sig == init_signature:
+            continue
+        tx = get_transaction(rpc, sig)
+        if tx is None:
+            continue
+        s = summarize_transaction(sig, tx)
+        logs = s.get("logMessages") or []
+        if any("InitMarketLedger" in x for x in logs):
+            continue
+        pids = {p.get("address") for p in s.get("programIds", [])}
+        if "pReDicTmksnPfkfiz33ndSdbe2dY43KYPg4U2dbvHvb" not in pids:
+            continue
+        signer_keys = [
+            k.get("pubkey") for k in (s.get("accountKeyDetails") or [])
+            if isinstance(k, dict) and k.get("signer")
+        ]
+        transfers = [
+            ev for ev in (s.get("parsedInstructions") or [])
+            if ev.get("type") in ("transfer", "transferChecked")
+        ]
+        out.append({
+            "signature": sig,
+            "slot": s.get("slot"),
+            "blockTime": s.get("blockTime"),
+            "signers": signer_keys,
+            "outerInstructions": s.get("outerInstructions"),
+            "transfers": transfers,
+            "logMessages": logs,
+            "preTokenBalances": s.get("preTokenBalances"),
+            "postTokenBalances": s.get("postTokenBalances"),
+        })
+    return out
+
 def find_user_open_candidates(rpc: Rpc, wallet: str, usdc_account: str, before_signature: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
     cfg: dict[str, Any] = {"limit": limit, "commitment": "finalized"}
     if before_signature:
@@ -724,6 +766,17 @@ def main() -> int:
         except Exception as exc:
             open_candidates = [{"error": str(exc)}]
 
+    initialized_market_orders = []
+    try:
+        initialized_market_orders = find_initialized_market_orders(
+            rpc,
+            "GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX",
+            "4HG2x8c9XgRBUCjprDo1EVKZfqC6tXziYi3dmmCTEFVbtoEh6C1tW8cV7m4tmZKPFJceT2UeCyTUAo7Goc9fRG5Y",
+            200,
+        )
+    except Exception as exc:
+        initialized_market_orders = [{"error": str(exc)}]
+
     explicit = []
     wire_dumps = {}
     for signature in cfg.get("evidenceTransactions", []):
@@ -756,6 +809,7 @@ def main() -> int:
         "targets": targets,
         "evidenceTransactions": explicit,
         "openOrderCandidates": open_candidates,
+        "initializedMarketOrders": initialized_market_orders,
     }
     (out_dir / "wire-transactions.json").write_text(json.dumps(wire_dumps, indent=2, sort_keys=False))
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
