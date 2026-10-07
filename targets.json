@@ -1,0 +1,31 @@
+{
+  "accounts": [
+    {
+      "label": "Initialized Kalshi market ledger (KXEPLGAME-26FEB18WOLARS-ARS / USDC)",
+      "address": "ERm2CMDxUJduckmBkZU28SBzzGycZzcdUbiRmzqRaoA"
+    },
+    {
+      "label": "Initialized Kalshi YES mint (KXEPLGAME-26FEB18WOLARS-ARS / USDC)",
+      "address": "EahtAm7FJfTrGdEFvsQbztsadM6ohMqyPcLk1Q6YCRDx"
+    },
+    {
+      "label": "Initialized Kalshi NO mint (KXEPLGAME-26FEB18WOLARS-ARS / USDC)",
+      "address": "4kXWe1ofHoihJfSzTAT7Yecm5vsEuBFEKmrtLzuASLU8"
+    },
+    {
+      "label": "Tie-market ledger candidate (KXEPLGAME-26FEB18WOLARS-TIE / USDC)",
+      "address": "GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX"
+    },
+    {
+      "label": "Tie-market YES mint candidate",
+      "address": "4qeSi2JVCbE9VQt1uzTJTpJSKdMFRsqWuvf3UL9fGa2P"
+    },
+    {
+      "label": "Tie-market NO mint candidate",
+      "address": "7GA2eFoEupkSqJaeKrHgS516dipVDfmQ4ZQ2BFdZpdb3"
+    }
+  ],
+  "evidenceTransactions": [
+    "2sF5df4KwTsKx4V8Qg3GLAQFRDRtctnVUaQbB9n3cjyvyHxKKr6RPHWu38HRvMozd7HGi5JvbLw4amXMQeYvLuL5"
+  ]
+}
