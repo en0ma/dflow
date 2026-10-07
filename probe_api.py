@@ -73,13 +73,18 @@ def decode_open(d):
       "u64_72":int.from_bytes(d[72:80],"little"),
     }
 
-markets=get_json(META+"/api/v1/markets?status=active&limit=50").get("markets",[])
+events=get_json(META+"/api/v1/events?withNestedMarkets=true&limit=200").get("events",[])
 chosen=None
-for m in markets:
-    accounts=m.get("accounts") or {}
-    acct=accounts.get(USDC)
-    if acct and acct.get("yesMint"):
-        chosen={"ticker":m.get("ticker"),"yesMint":acct["yesMint"],"noMint":acct.get("noMint")}
+for event in events:
+    for m in (event.get("markets") or []):
+        if m.get("status") != "active":
+            continue
+        accounts=m.get("accounts") or {}
+        acct=accounts.get(USDC) or (next(iter(accounts.values())) if accounts else None)
+        if acct and acct.get("yesMint"):
+            chosen={"ticker":m.get("ticker"),"yesMint":acct["yesMint"],"noMint":acct.get("noMint")}
+            break
+    if chosen:
         break
 if not chosen:
     raise SystemExit("no active USDC prediction market found")
