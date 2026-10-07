@@ -141,6 +141,47 @@ def signatures_for_address(rpc: Rpc, address: str, max_pages: int) -> tuple[list
     return all_sigs, exhausted
 
 
+
+def find_user_open_candidates(rpc: Rpc, wallet: str, usdc_account: str, before_signature: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    cfg: dict[str, Any] = {"limit": limit, "commitment": "finalized"}
+    if before_signature:
+        cfg["before"] = before_signature
+    sigs = rpc.call("getSignaturesForAddress", [wallet, cfg]) or []
+    out = []
+    for meta in sigs:
+        tx = get_transaction(rpc, meta["signature"])
+        if tx is None:
+            continue
+        keys = account_keys(tx)
+        if wallet not in keys:
+            continue
+        # Wallet must be a signer in accountKeys.
+        signer = False
+        for k in tx.get("transaction", {}).get("message", {}).get("accountKeys", []):
+            if isinstance(k, dict) and k.get("pubkey") == wallet and k.get("signer"):
+                signer = True
+                break
+        if not signer:
+            continue
+        summary = summarize_transaction(meta["signature"], tx)
+        # Prefer transactions touching the user's USDC account and a DFlow program.
+        touches_usdc = usdc_account in keys
+        dflow_programs = [p["address"] for p in summary.get("programIds", []) if p.get("address") in (
+            "pReDicTmksnPfkfiz33ndSdbe2dY43KYPg4U2dbvHvb",
+            "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
+        )]
+        if touches_usdc and dflow_programs:
+            out.append({
+                "signature": meta["signature"],
+                "slot": tx.get("slot"),
+                "blockTime": tx.get("blockTime"),
+                "programs": dflow_programs,
+                "outerInstructions": summary.get("outerInstructions"),
+                "preTokenBalances": summary.get("preTokenBalances"),
+                "postTokenBalances": summary.get("postTokenBalances"),
+            })
+    return out
+
 def get_transaction(rpc: Rpc, signature: str) -> dict[str, Any] | None:
     return rpc.call("getTransaction", [
         signature,
@@ -477,6 +518,21 @@ def main() -> int:
                 "history": {},
             })
 
+    open_candidates = []
+    discovery = cfg.get("openOrderDiscovery") or {}
+    if discovery.get("wallet") and discovery.get("usdcAccount"):
+        print("Searching for user-signed open-order candidates", flush=True)
+        try:
+            open_candidates = find_user_open_candidates(
+                rpc,
+                discovery["wallet"],
+                discovery["usdcAccount"],
+                discovery.get("beforeSignature"),
+                int(discovery.get("limit", 200)),
+            )
+        except Exception as exc:
+            open_candidates = [{"error": str(exc)}]
+
     explicit = []
     for signature in cfg.get("evidenceTransactions", []):
         print(f"Decoding evidence transaction {signature}", flush=True)
@@ -489,6 +545,7 @@ def main() -> int:
         "rpcDisplay": "SOLANA_RPC_URL" if (os.getenv("SOLANA_RPC_URL") or "").strip() else "public mainnet-beta RPC",
         "targets": targets,
         "evidenceTransactions": explicit,
+        "openOrderCandidates": open_candidates,
     }
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
     md = render_markdown(report)
