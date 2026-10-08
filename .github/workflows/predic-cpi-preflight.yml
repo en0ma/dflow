@@ -58,6 +58,20 @@ jobs:
           name: predic-cpi-historical-${{ github.run_id }}
           path: reports/predic-cpi/
           if-no-files-found: warn
+      - name: Recover deployed pReDic ELF from RPC
+        run: python3 program_dump.py
+      - name: Verify ELF identity and deployment metadata
+        run: python3 predic-cpi-probe/verify_elf.py
+      - name: Upload runtime input ELF and manifest
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-cpi-runtime-inputs-${{ github.run_id }}
+          path: |
+            reports/program/predictions.so
+            reports/program/info.json
+            reports/predic-cpi/elf-verification.json
+          if-no-files-found: warn
       - name: Clarify execution gate
         run: |
           echo "PASS means: Rust ABI encoder compiles, tests pass, RPC is reachable."
