@@ -35,12 +35,14 @@ def main():
     dmeta,ddata=account(programdata)
     ddisc=struct.unpack_from("<I",ddata,0)[0]
     slot=struct.unpack_from("<Q",ddata,4)[0]
-    opt=struct.unpack_from("<I",ddata,12)[0]
-    off=16
+    opt=ddata[12]
+    off=13
     authority=None
     if opt:
         authority=b58e(ddata[off:off+32]); off+=32
     elf=ddata[off:]
+    if elf[:4] != b"\x7fELF":
+        raise RuntimeError(f"ELF magic mismatch at offset {off}: {elf[:4].hex()}")
     (out/"program-account.bin").write_bytes(pdata)
     (out/"programdata-account.bin").write_bytes(ddata)
     (out/"predictions.so").write_bytes(elf)
