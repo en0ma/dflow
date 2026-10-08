@@ -16,7 +16,7 @@ ALPH="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58decode(s):
  n=0
  for c in s:n=n*58+ALPH.index(c)
- return b"\\x00"*(len(s)-len(s.lstrip("1")))+n.to_bytes((n.bit_length()+7)//8,"big")
+ return bytes([0])*(len(s)-len(s.lstrip("1")))+n.to_bytes((n.bit_length()+7)//8,"big")
 def call(method,params):
  body=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params}).encode()
  req=urllib.request.Request(RPC,data=body,headers={"Content-Type":"application/json"})
