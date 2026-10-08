@@ -81,3 +81,24 @@ mod tests {
         assert!(x.bytes().is_err());
     }
 }
+
+#[cfg(test)]
+mod historical_pda_tests {
+    use super::*;
+    use std::str::FromStr;
+    #[test]
+    fn two_historical_order_addresses() {
+        let market = Pubkey::from_str("GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX").unwrap();
+        let cases = [
+            ("F6Yt9m6YCM9dazu9XDT57LhZrGaBsYGge2uNJp4s8kM9",
+             13680820813140513569u64, "E6RHT33UpybNumSJPxXMiqGCGaEdhn8Y3h2rAUFaTb7",255u8),
+            ("DZSQ2gBecP1qoC1xH24i6M1sJZDkTcyPRUHMJR29kgVv",
+             11016964509051642506u64, "5wX9x4a8dvS6NyhdDPNCyRrXvMh5TJu48Qc2s37wDWxF",253u8),
+        ];
+        for (user,nonce,expected,bump) in cases {
+            let (derived,b) = order_pda(&Pubkey::from_str(user).unwrap(),&market,nonce);
+            assert_eq!(derived,Pubkey::from_str(expected).unwrap());
+            assert_eq!(b,bump);
+        }
+    }
+}
