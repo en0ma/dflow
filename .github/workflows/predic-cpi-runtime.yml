@@ -18,6 +18,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Recover deployed ELF (read-only RPC)
         run: python3 program_dump.py
+      - name: Inspect real OPEN account owners and layouts
+        run: |
+          python3 predic-cpi-probe/historical_rpc.py
+          python3 predic-cpi-probe/account_census.py
       - name: Stage pReDic deployed ELF for program-test
         shell: bash
         run: |
@@ -39,4 +43,6 @@ jobs:
           path: |
             reports/program/info.json
             reports/program/predictions.so
+            reports/predic-cpi/historical-rpc.json
+            reports/predic-cpi/account-census.json
           if-no-files-found: warn
