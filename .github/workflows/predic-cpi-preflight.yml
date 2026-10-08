@@ -1,5 +1,9 @@
 name: pReDic CPI research preflight
 on:
+  pull_request:
+    paths:
+      - 'predic-cpi-probe/**'
+      - '.github/workflows/predic-cpi-preflight.yml'
   push:
     paths:
       - 'predic-cpi-probe/**'
