@@ -28,7 +28,9 @@ jobs:
         env:
           RUST_BACKTRACE: '1'
           BPF_OUT_DIR: ${{ github.workspace }}/predic-cpi-runtime-smoke/tests/fixtures
-        run: cargo test --test dispatch -- --nocapture
+        run: |
+          cargo test --test dispatch -- --nocapture
+          cargo test --test accounts -- --nocapture
       - name: Upload executable identity and test inputs
         uses: actions/upload-artifact@v4
         if: always()
