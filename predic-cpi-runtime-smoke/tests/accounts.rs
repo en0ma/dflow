@@ -37,6 +37,7 @@ async fn cpi_dispatch_with_complete_account_positions() {
     for key in [config, MARKET, vault, user_token, mint] {
         test.add_account(key,Account{lamports:1_000_000,data:vec![],owner:solana_sdk::system_program::id(),executable:false,rent_epoch:0});
     }
+    test.add_account(wallet,Account{lamports:10_000_000,data:vec![],owner:solana_sdk::system_program::id(),executable:false,rent_epoch:0});
     let mut ctx=test.start_with_context().await;
     let mut data=[0u8;80];
     data[..8].copy_from_slice(&64u64.to_le_bytes());
