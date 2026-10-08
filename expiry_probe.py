@@ -39,7 +39,7 @@ def signatures(max_pages=2):
         before=page[-1]["signature"]
     return out
 
-def batch_txs(sigs,batch=50):
+def batch_txs(sigs,batch=10):
     out={}
     for start in range(0,len(sigs),batch):
         chunk=sigs[start:start+batch]
@@ -83,7 +83,7 @@ def decode(tx):
     return events,opens
 
 def main():
-    sigmeta=signatures(2)
+    sigmeta=signatures(1)[:500]
     print("signatures",len(sigmeta),flush=True)
     sigs=[x["signature"] for x in sigmeta]
     txs=batch_txs(sigs)
