@@ -22,8 +22,8 @@ async fn cpi_dispatch_with_complete_account_positions() {
     test.prefer_bpf(false);
     test.add_program("native_cpi_probe",CALLER,processor!(process));
     test.set_compute_max_units(1_000_000);
-    let mut ctx=test.start_with_context().await;
-    let wallet=ctx.payer.pubkey();
+    let wallet_key=solana_sdk::signature::Keypair::new();
+    let wallet=wallet_key.pubkey();
     let order=Pubkey::find_program_address(
         &[b"userOrderEscrow",wallet.as_ref(),MARKET.as_ref(),&123456789u64.to_le_bytes()],
         &PREDIC
@@ -37,6 +37,7 @@ async fn cpi_dispatch_with_complete_account_positions() {
     for key in [config, MARKET, vault, user_token, mint] {
         test.add_account(key,Account{lamports:1_000_000,data:vec![],owner:solana_sdk::system_program::id(),executable:false,rent_epoch:0});
     }
+    let mut ctx=test.start_with_context().await;
     let mut data=[0u8;80];
     data[..8].copy_from_slice(&64u64.to_le_bytes());
     data[8..16].copy_from_slice(&123456789u64.to_le_bytes());
@@ -54,12 +55,12 @@ async fn cpi_dispatch_with_complete_account_positions() {
             AccountMeta::new(wallet,true),
             AccountMeta::new(wallet,true),
             AccountMeta::new(wallet,true),
-            AccountMeta::new_readonly(solana_sdk::spl_token::id(),false),
+            AccountMeta::new_readonly(spl_token::id(),false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(),false),
         ],
         data:data.to_vec()
     };
-    let tx=Transaction::new_signed_with_payer(&[ix],Some(&wallet),&[&ctx.payer],ctx.last_blockhash);
+    let tx=Transaction::new_signed_with_payer(&[ix],Some(&ctx.payer.pubkey()),&[&ctx.payer,&wallet_key],ctx.last_blockhash);
     let result=ctx.banks_client.process_transaction(tx).await;
     assert!(result.is_err(),"Synthetic invalid account fixtures unexpectedly opened an order");
     println!("12-position OPEN CPI result (expected rejection): {:?}",result.err());
