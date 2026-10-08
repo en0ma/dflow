@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 predic-cpi-probe/historical_rpc.py
           python3 predic-cpi-probe/account_census.py
+          python3 predic-cpi-probe/export_live_fixtures.py
       - name: Stage pReDic deployed ELF for program-test
         shell: bash
         run: |
@@ -35,6 +36,7 @@ jobs:
         run: |
           cargo test --test dispatch -- --nocapture
           cargo test --test accounts -- --nocapture
+          cargo test --test live_owners -- --nocapture
       - name: Upload executable identity and test inputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -45,4 +47,5 @@ jobs:
             reports/program/predictions.so
             reports/predic-cpi/historical-rpc.json
             reports/predic-cpi/account-census.json
+            predic-cpi-runtime-smoke/tests/fixtures/live_accounts.json
           if-no-files-found: warn
