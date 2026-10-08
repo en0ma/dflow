@@ -52,7 +52,7 @@ jobs:
           path: reports/api-probe.json
           if-no-files-found: warn
 
-      - name: Check RPC prerequisite
+      - name: Check RPC prerequisite and select archival provider
         run: |
           if [ -z "$SOLANA_RPC_URL" ]; then
             echo "::warning::SOLANA_RPC_URL is not configured. Skipping history-heavy collection to avoid public RPC rate limits."
