@@ -6,6 +6,7 @@ use solana_sdk::{account::Account,signature::{Keypair,Signer},transaction::Trans
 use serde::Deserialize;
 use std::{fs,str::FromStr};
 const PREDIC:Pubkey=solana_program::pubkey!("pReDicTmksnPfkfiz33ndSdbe2dY43KYPg4U2dbvHvb");
+const EVENT_AUTHORITY:Pubkey=solana_program::pubkey!("ATZQPakBrumxMrSyuEmrt6NcxBbTR1Ucs99dnPFpBUuM");
 const CALLER:Pubkey=Pubkey::new_from_array([42u8;32]);
 #[derive(Deserialize)] struct Snapshot {accounts:Vec<Entry>}
 #[derive(Deserialize)] struct Entry {index:usize,address:String,value:Option<serde_json::Value>}
@@ -21,7 +22,7 @@ async fn batch_open_diagnostics() {
  let snapshot:Snapshot=serde_json::from_str(&raw).unwrap();
  assert_eq!(snapshot.accounts.len(),12);
  for payload_kind in 0..2 {
- for account1_owner in 0..3 {
+ for account1_owner in 0..5 {
  for token_authority in 0..2 {
  for invoke_directly in 0..2 {
  let mut test=ProgramTest::new("predictions",PREDIC,None);
@@ -36,13 +37,13 @@ async fn batch_open_diagnostics() {
  for entry in &snapshot.accounts{
   let key=match entry.index {
    4=>order,7|8|9=>wallet.pubkey(),
-   1=> if account1_owner==2 {Pubkey::from_str(&entry.address).unwrap()} else {Pubkey::new_from_array([11u8;32])},
+   1=>match account1_owner {2=>Pubkey::from_str(&entry.address).unwrap(),3|4=>EVENT_AUTHORITY,_=>Pubkey::new_from_array([11u8;32])},
    _=>Pubkey::from_str(&entry.address).unwrap(),
   };
   keys.push(key);
   if entry.index==0||entry.index==10||entry.index==11||entry.index==4||entry.index==8||entry.index==9 {continue;}
   if entry.index==7||entry.index==1 {
-   test.add_account(key,Account{lamports:10_000_000,data:vec![],owner:if entry.index==1 && account1_owner==1 {PREDIC} else {solana_sdk::system_program::id()},executable:false,rent_epoch:0});
+   test.add_account(key,Account{lamports:10_000_000,data:vec![],owner:if entry.index==1 && (account1_owner==1 || account1_owner==4) {PREDIC} else {solana_sdk::system_program::id()},executable:false,rent_epoch:0});
    continue;
   }
   let v=entry.value.as_ref().expect("required live account missing");
@@ -76,6 +77,10 @@ async fn batch_open_diagnostics() {
  let result=ctx.banks_client.process_transaction(tx).await;
  println!("MATRIX payload={} account1={} token_owner={} direct={} outcome={:?}",
   payload_kind,account1_owner,token_authority,invoke_directly,result);
- if result.is_ok(){panic!("OPEN_SUCCEEDED payload={} account1={} token_owner={} direct={} -- inspect account state before treating as verified",payload_kind,account1_owner,token_authority,invoke_directly);}
+ if result.is_ok(){
+  let order_state=ctx.banks_client.get_account(order).await.unwrap();
+  println!("POTENTIAL_OPEN_SUCCESS payload={} account1={} token_owner={} direct={} order_exists={} order_len={}",payload_kind,account1_owner,token_authority,invoke_directly,order_state.is_some(),order_state.as_ref().map(|a|a.data.len()).unwrap_or(0));
+  assert!(order_state.as_ref().is_some_and(|a|a.owner==PREDIC && a.data.len()==344),"Successful instruction lacked expected pReDic order state");
+ }
  }}}}
 }
