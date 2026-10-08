@@ -827,21 +827,40 @@ def parse_open_unknown16(tx: dict[str, Any]) -> list[dict[str, Any]]:
     return opens
 
 def scan_order_lifecycle_expiry(rpc: Rpc, max_pages: int = 3) -> dict[str, Any]:
+    print(f"[lifecycle] fetching signatures: max_pages={max_pages}", flush=True)
     sigs, exhausted = signatures_for_address(rpc, PREDICTION_PROGRAM, max_pages)
+    max_txs = int(os.getenv("LIFECYCLE_SCAN_MAX_TX", "300"))
+    if max_txs > 0:
+        sigs = sigs[:max_txs]
+    print(f"[lifecycle] signatures ready: {len(sigs)}; transaction cap={max_txs}; newest-first window", flush=True)
     opens_by_order: dict[str, dict[str, Any]] = {}
     terminals: list[dict[str, Any]] = []
     tx_count = 0
+    failures = 0
+    nulls = 0
+    started = time.monotonic()
 
     # Process oldest -> newest so lifecycle ordering is natural.
-    for meta in reversed(sigs):
+    for index, meta in enumerate(reversed(sigs), start=1):
+        if index == 1 or index % 25 == 0:
+            print(
+                f"[lifecycle] progress {index}/{len(sigs)}; decoded={tx_count}; "
+                f"errors={failures}; null={nulls}; opens={len(opens_by_order)}; "
+                f"terminals={len(terminals)}; elapsed={time.monotonic()-started:.0f}s",
+                flush=True,
+            )
         sig = meta.get("signature")
         if not sig:
             continue
         try:
             tx = get_transaction_raw(rpc, sig)
-        except Exception:
+        except Exception as exc:
+            failures += 1
+            if failures <= 3 or failures % 25 == 0:
+                print(f"[lifecycle] RPC failure #{failures} at item {index}: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
             continue
         if not tx:
+            nulls += 1
             continue
         tx_count += 1
         slot = tx.get("slot")
@@ -865,6 +884,12 @@ def scan_order_lifecycle_expiry(rpc: Rpc, max_pages: int = 3) -> dict[str, Any]:
             elif ev["lifecycle"] in (3, 4):
                 terminals.append(row)
 
+    print(
+        f"[lifecycle] retrieval complete: {len(sigs)} candidates, decoded={tx_count}, "
+        f"errors={failures}, null={nulls}, opens={len(opens_by_order)}, "
+        f"terminals={len(terminals)}, elapsed={time.monotonic()-started:.0f}s",
+        flush=True,
+    )
     matches = []
     for term in terminals:
         op = opens_by_order.get(term["userOrder"])
@@ -897,6 +922,9 @@ def scan_order_lifecycle_expiry(rpc: Rpc, max_pages: int = 3) -> dict[str, Any]:
         "signaturesFetched": len(sigs),
         "historyExhausted": exhausted,
         "transactionsDecoded": tx_count,
+        "rpcErrors": failures,
+        "nullTransactions": nulls,
+        "scanElapsedSeconds": round(time.monotonic()-started, 1),
         "opensFound": len(opens_by_order),
         "terminalsFound": len(terminals),
         "matchedOpenTerminalPairs": len(matches),
@@ -913,7 +941,13 @@ def main() -> int:
     p.add_argument("--scan-limit", type=int, default=int(os.getenv("SCAN_TX_LIMIT", "1000")))
     args = p.parse_args()
 
+    configured_rpc = bool((os.getenv("SOLANA_RPC_URL") or "").strip())
     rpc_url = os.getenv("SOLANA_RPC_URL") or "https://api.mainnet-beta.solana.com"
+    # Do not print the RPC URL: provider keys can be embedded in its path/query.
+    print(
+        "[rpc] SOLANA_RPC_URL=" + ("SET (using configured endpoint)" if configured_rpc else "NOT SET (using public fallback)"),
+        flush=True,
+    )
     rpc = Rpc(rpc_url)
 
     cfg = json.loads(Path(args.targets).read_text())
