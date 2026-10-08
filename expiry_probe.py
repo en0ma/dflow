@@ -39,21 +39,28 @@ def signatures(max_pages=2):
         before=page[-1]["signature"]
     return out
 
-def batch_txs(sigs,batch=10):
+def batch_txs(sigs,batch=5):
     out={}
     for start in range(0,len(sigs),batch):
         chunk=sigs[start:start+batch]
         req=[]
         for i,s in enumerate(chunk):
             req.append({"jsonrpc":"2.0","id":i,"method":"getTransaction","params":[s,{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}]})
-        try:
-            rows=rpc(req)
+        rows=None
+        for attempt in range(7):
+            try:
+                rows=rpc(req)
+                break
+            except Exception as e:
+                delay=min(2 ** attempt, 16)
+                print("batch retry",start,attempt,str(e),"sleep",delay,flush=True)
+                time.sleep(delay)
+        if rows is not None:
             byid={x.get("id"):x for x in rows}
-            for i,s in enumerate(chunk):
-                out[s]=byid.get(i,{}).get("result")
-        except Exception as e:
-            print("batch error",start,e,flush=True)
+            for i,sig in enumerate(chunk):
+                out[sig]=byid.get(i,{}).get("result")
         print(f"fetched {min(start+batch,len(sigs))}/{len(sigs)}",flush=True)
+        time.sleep(0.35)
     return out
 
 def all_ix(tx):
@@ -83,7 +90,7 @@ def decode(tx):
     return events,opens
 
 def main():
-    sigmeta=signatures(1)[:500]
+    sigmeta=signatures(2)[:1200]
     print("signatures",len(sigmeta),flush=True)
     sigs=[x["signature"] for x in sigmeta]
     txs=batch_txs(sigs)
