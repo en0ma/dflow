@@ -21,6 +21,9 @@ fn process(_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult
 #[tokio::test]
 async fn cpi_dispatch_into_deployed_elf() {
     let mut test = ProgramTest::new("predictions", PREDIC, None);
+    // BPF_OUT_DIR enables SBF preference globally. Keep the already-loaded pReDic ELF,
+    // then explicitly choose the native processor for our test caller.
+    test.prefer_bpf(false);
     test.add_program("native_cpi_probe", CALLER, processor!(process));
     test.set_compute_max_units(1_000_000);
     let mut ctx = test.start_with_context().await;
