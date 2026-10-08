@@ -1,0 +1,25 @@
+name: DFlow Revert Cause Probe
+on:
+  push:
+    paths:
+      - revert_probe.py
+      - .github/workflows/revert-probe.yml
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python revert_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dflow-revert-pairs-${{ github.run_id }}
+          path: reports/revert-pairs.json
+          if-no-files-found: warn
