@@ -70,7 +70,7 @@ async fn batch_open_diagnostics() {
   if [3,4,6,7,8,9].contains(&i){AccountMeta::new(*k,[7,8,9].contains(&i))}
   else{AccountMeta::new_readonly(*k,false)}
  ).collect();
- let ix=Instruction{program_id:if invoke_directly {PREDIC} else {CALLER},accounts:metas,data:data.to_vec()};
+ let ix=Instruction{program_id:if invoke_directly==1 {PREDIC} else {CALLER},accounts:metas,data:data.to_vec()};
  let tx=Transaction::new_signed_with_payer(&[ix],Some(&ctx.payer.pubkey()),
   &[&ctx.payer,&wallet],ctx.last_blockhash);
  let result=ctx.banks_client.process_transaction(tx).await;
