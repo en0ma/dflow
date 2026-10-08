@@ -20,7 +20,7 @@ jobs:
       - name: Compile and test OPEN encoder and PDA derivation helper
         working-directory: predic-cpi-probe
         run: |
-          cargo test --locked || cargo test
+          cargo test
           cargo check
       - name: Confirm RPC access without printing credentials
         shell: bash
@@ -45,6 +45,15 @@ jobs:
               print("RPC getVersion: failed; error class:",type(e).__name__)
               raise
           PY
+      - name: Verify historical OPEN instructions over RPC
+        run: python3 predic-cpi-probe/historical_rpc.py
+      - name: Upload reproducible historical verification
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-cpi-historical-${{ github.run_id }}
+          path: reports/predic-cpi/
+          if-no-files-found: warn
       - name: Clarify execution gate
         run: |
           echo "PASS means: Rust ABI encoder compiles, tests pass, RPC is reachable."
