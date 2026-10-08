@@ -6,11 +6,11 @@ on:
       max_signature_pages:
         description: "1000 signatures/page; increase when using an archival RPC"
         required: false
-        default: "10"
+        default: "2"
       scan_tx_limit:
         description: "Oldest transactions per account to decode for mint/burn evidence"
         required: false
-        default: "1000"
+        default: "50"
   schedule:
     - cron: "17 7 * * 1"
   push:
@@ -25,11 +25,11 @@ permissions:
 jobs:
   forensics:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
-      MAX_SIGNATURE_PAGES: ${{ inputs.max_signature_pages || '10' }}
-      SCAN_TX_LIMIT: ${{ inputs.scan_tx_limit || '1000' }}
+      MAX_SIGNATURE_PAGES: ${{ inputs.max_signature_pages || '2' }}
+      SCAN_TX_LIMIT: ${{ inputs.scan_tx_limit || '50' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -52,8 +52,16 @@ jobs:
           path: reports/api-probe.json
           if-no-files-found: warn
 
+      - name: Check RPC prerequisite
+        run: |
+          if [ -z "$SOLANA_RPC_URL" ]; then
+            echo "::warning::SOLANA_RPC_URL is not configured. Skipping history-heavy collection to avoid public RPC rate limits."
+            echo "Full collector requires a historical Solana RPC endpoint configured as the SOLANA_RPC_URL repository secret."
+          fi
+
       - name: Run Solana forensic collector
-        run: python analyze.py --targets targets.json --out-dir reports
+        if: env.SOLANA_RPC_URL != ''
+        run: timeout 900s python analyze.py --targets targets.json --out-dir reports
 
       - name: Upload evidence bundle
         if: always()
