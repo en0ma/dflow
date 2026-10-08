@@ -1,0 +1,31 @@
+name: DFlow program dump
+on:
+  push:
+    paths:
+      - program_dump.py
+      - .github/workflows/program-dump.yml
+  workflow_dispatch:
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python program_dump.py
+      - name: ELF metadata and strings
+        run: |
+          file reports/program/predictions.so || true
+          readelf -h reports/program/predictions.so || true
+          strings -a reports/program/predictions.so | grep -Ei 'fillable|slot|slippage|order|market|outcome|redeem|vault|seed|close|revert|cancel' | head -500 > reports/program/interesting-strings.txt || true
+          objdump -h reports/program/predictions.so > reports/program/sections.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dflow-program-dump-${{ github.run_id }}
+          path: reports/program/
+          if-no-files-found: error
