@@ -4,7 +4,7 @@ use solana_program_test::{processor,ProgramTest};
 use solana_sdk::{signature::Signer,transaction::Transaction};
 
 const PREDIC: Pubkey = solana_program::pubkey!("pReDicTmksnPfkfiz33ndSdbe2dY43KYPg4U2dbvHvb");
-const CALLER: Pubkey = solana_program::pubkey!("CpiProbe1111111111111111111111111111111111");
+const CALLER: Pubkey = Pubkey::new_from_array([42u8;32]);
 
 // Native caller intentionally forwards only the pReDic program account.
 // This checks runtime loader and CPI dispatch, NOT a valid OPEN.
