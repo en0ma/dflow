@@ -4,10 +4,6 @@ on:
     paths:
       - 'predic-cpi-runtime-smoke/**'
       - '.github/workflows/predic-cpi-runtime.yml'
-  push:
-    paths:
-      - 'predic-cpi-runtime-smoke/**'
-      - '.github/workflows/predic-cpi-runtime.yml'
   workflow_dispatch:
 permissions:
   contents: read
