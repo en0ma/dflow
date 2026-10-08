@@ -1,0 +1,25 @@
+name: DFlow expiry ABI probe
+on:
+  push:
+    paths:
+      - expiry_probe.py
+      - .github/workflows/expiry-probe.yml
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python expiry_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dflow-expiry-probe-${{ github.run_id }}
+          path: reports/expiry-probe.json
+          if-no-files-found: warn
