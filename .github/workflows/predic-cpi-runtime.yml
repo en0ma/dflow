@@ -1,0 +1,43 @@
+name: pReDic experimental CPI runtime
+on:
+  pull_request:
+    paths:
+      - 'predic-cpi-runtime-smoke/**'
+      - '.github/workflows/predic-cpi-runtime.yml'
+  push:
+    paths:
+      - 'predic-cpi-runtime-smoke/**'
+      - '.github/workflows/predic-cpi-runtime.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Recover deployed ELF (read-only RPC)
+        run: python3 program_dump.py
+      - name: Stage pReDic deployed ELF for program-test
+        shell: bash
+        run: |
+          mkdir -p predic-cpi-runtime-smoke/tests/fixtures
+          cp reports/program/predictions.so predic-cpi-runtime-smoke/tests/fixtures/predictions.so
+      - name: Attempt native-to-deployed-sBPF CPI dispatch
+        working-directory: predic-cpi-runtime-smoke
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo test --test dispatch -- --nocapture
+      - name: Upload executable identity and test inputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-runtime-${{ github.run_id }}
+          path: |
+            reports/program/info.json
+            reports/program/predictions.so
+          if-no-files-found: warn
