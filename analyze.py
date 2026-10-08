@@ -772,10 +772,25 @@ def _raw_ix_bytes(ix: dict[str, Any]) -> bytes | None:
 
 def _all_raw_ixs(tx: dict[str, Any]) -> list[dict[str, Any]]:
     msg = tx.get("transaction", {}).get("message", {}) or {}
+    keys = [
+        k.get("pubkey") if isinstance(k, dict) else k
+        for k in (msg.get("accountKeys") or [])
+    ]
+    loaded = (tx.get("meta") or {}).get("loadedAddresses") or {}
+    keys += list(loaded.get("writable") or []) + list(loaded.get("readonly") or [])
     out = list(msg.get("instructions") or [])
     for group in (tx.get("meta", {}).get("innerInstructions") or []):
         out.extend(group.get("instructions") or [])
-    return out
+    resolved = []
+    for ix in out:
+        if "programId" in ix:
+            resolved.append(ix)
+        else:
+            pidx = ix.get("programIdIndex")
+            pid = keys[pidx] if isinstance(pidx, int) and pidx < len(keys) else None
+            resolved.append({**ix, "programId": pid})
+    return resolved
+
 
 def _pubkey_b58(raw32: bytes) -> str:
     n = int.from_bytes(raw32, "big")
@@ -827,109 +842,91 @@ def parse_open_unknown16(tx: dict[str, Any]) -> list[dict[str, Any]]:
     return opens
 
 def scan_order_lifecycle_expiry(rpc: Rpc, max_pages: int = 3) -> dict[str, Any]:
-    print(f"[lifecycle] fetching signatures: max_pages={max_pages}", flush=True)
-    sigs, exhausted = signatures_for_address(rpc, PREDICTION_PROGRAM, max_pages)
-    max_txs = int(os.getenv("LIFECYCLE_SCAN_MAX_TX", "300"))
-    if max_txs > 0:
-        sigs = sigs[:max_txs]
-    print(f"[lifecycle] signatures ready: {len(sigs)}; transaction cap={max_txs}; newest-first window", flush=True)
-    opens_by_order: dict[str, dict[str, Any]] = {}
-    terminals: list[dict[str, Any]] = []
-    tx_count = 0
-    failures = 0
-    nulls = 0
-    started = time.monotonic()
+    ledgers = {
+        "TIE": "GGViDLxL6RRQ4zTydGoiL6NnLugxyDGraydUBAQfo9iX",
+        "ARS": "ERm2CMDxUJduckmBkZU28SBzzGycZzcdUbiRmzqRaoA",
+    }
+    known_sig = "4HG2x8c9XgRBUCjprDo1EVKZfqC6tXziYi3dmmCTEFVbtoEh6C1tW8cV7m4tmZKPFJceT2UeCyTUAo7Goc9fRG5Y"
+    print("[lifecycle] self-test known OPEN transaction", flush=True)
+    known_tx = get_transaction_raw(rpc, known_sig)
+    known_ev = parse_user_order_events(known_tx) if known_tx else []
+    known_op = parse_open_unknown16(known_tx) if known_tx else []
+    print(f"[lifecycle] self-test: events={len(known_ev)} opens={len(known_op)} eventTypes={[x['lifecycle'] for x in known_ev]}", flush=True)
+    if not known_ev:
+        print("[lifecycle] WARNING: known OPEN self-test failed; inspect raw instruction envelope before treating zero counts as meaningful", flush=True)
 
-    # Process oldest -> newest so lifecycle ordering is natural.
-    for index, meta in enumerate(reversed(sigs), start=1):
-        if index == 1 or index % 25 == 0:
-            print(
-                f"[lifecycle] progress {index}/{len(sigs)}; decoded={tx_count}; "
-                f"errors={failures}; null={nulls}; opens={len(opens_by_order)}; "
-                f"terminals={len(terminals)}; elapsed={time.monotonic()-started:.0f}s",
-                flush=True,
-            )
-        sig = meta.get("signature")
-        if not sig:
-            continue
+    max_txs = int(os.getenv("LIFECYCLE_SCAN_MAX_TX", "300"))
+    pages = int(os.getenv("LIFECYCLE_LEDGER_PAGES", "1"))
+    sigs_by_sig: dict[str, dict[str, Any]] = {}
+    market_counts = {}
+    for label, ledger in ledgers.items():
+        print(f"[lifecycle] collecting {label} ledger signatures (pages={pages})", flush=True)
+        sigs, exhausted = signatures_for_address(rpc, ledger, pages)
+        market_counts[label] = {"signatures": len(sigs), "exhausted": exhausted}
+        for m in sigs[:max_txs if max_txs > 0 else len(sigs)]:
+            sigs_by_sig[m["signature"]] = m
+    sigs_by_sig[known_sig] = {"signature": known_sig}
+    candidates = sorted(sigs_by_sig.values(), key=lambda x: x.get("slot", 0))
+    print(f"[lifecycle] unique candidates={len(candidates)}; cap per ledger={max_txs}", flush=True)
+    opens_by_order: dict[str, dict[str, Any]] = {}
+    terminals = []
+    lifecycle_counts: dict[str, int] = {}
+    program_ix_count = 0
+    opens_without_payload = 0
+    tx_count = failures = nulls = 0
+    started = time.monotonic()
+    for index, meta in enumerate(candidates, start=1):
+        sig = meta["signature"]
         try:
-            tx = get_transaction_raw(rpc, sig)
+            tx = known_tx if sig == known_sig and known_tx else get_transaction_raw(rpc, sig)
         except Exception as exc:
             failures += 1
             if failures <= 3 or failures % 25 == 0:
-                print(f"[lifecycle] RPC failure #{failures} at item {index}: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
+                print(f"[lifecycle] RPC error #{failures}: {type(exc).__name__}: {str(exc)[:150]}", flush=True)
             continue
         if not tx:
             nulls += 1
             continue
         tx_count += 1
-        slot = tx.get("slot")
+        ix = _all_raw_ixs(tx)
+        program_ix_count += sum(x.get("programId") == PREDICTION_PROGRAM for x in ix)
         events = parse_user_order_events(tx)
-        if not events:
-            continue
-        open_payloads = parse_open_unknown16(tx)
-
+        opens = parse_open_unknown16(tx)
         for ev in events:
-            row = {
-                "signature": sig,
-                "slot": slot,
-                "blockTime": tx.get("blockTime"),
-                **ev,
-            }
-            if ev["lifecycle"] == 1:
-                # A normal open tx should have exactly one pReDic tag-64 payload.
-                if open_payloads:
-                    row.update(open_payloads[0])
+            kind = ev["lifecycle"]
+            lifecycle_counts[str(kind)] = lifecycle_counts.get(str(kind), 0) + 1
+            row = {"signature": sig, "slot": tx.get("slot"), "blockTime": tx.get("blockTime"), **ev}
+            if kind == 1:
+                if opens: row.update(opens[0])
+                else: opens_without_payload += 1
                 opens_by_order[ev["userOrder"]] = row
-            elif ev["lifecycle"] in (3, 4):
-                terminals.append(row)
-
-    print(
-        f"[lifecycle] retrieval complete: {len(sigs)} candidates, decoded={tx_count}, "
-        f"errors={failures}, null={nulls}, opens={len(opens_by_order)}, "
-        f"terminals={len(terminals)}, elapsed={time.monotonic()-started:.0f}s",
-        flush=True,
-    )
+            elif kind in (3, 4): terminals.append(row)
+        if index == 1 or index % 25 == 0 or index == len(candidates):
+            print(f"[lifecycle] {index}/{len(candidates)} decoded={tx_count} errors={failures} nulls={nulls} "
+                  f"programIX={program_ix_count} eventTypes={lifecycle_counts} "
+                  f"opens={len(opens_by_order)} terminals={len(terminals)} elapsed={time.monotonic()-started:.0f}s", flush=True)
     matches = []
     for term in terminals:
         op = opens_by_order.get(term["userOrder"])
-        if not op or not isinstance(op.get("slot"), int) or not isinstance(term.get("slot"), int):
-            continue
+        if not op or not isinstance(op.get("slot"), int): continue
         delta = term["slot"] - op["slot"]
-        u = op.get("unknown16")
+        unknown = op.get("unknown16")
         matches.append({
-            "userOrder": term["userOrder"],
-            "openSignature": op["signature"],
-            "openSlot": op["slot"],
-            "terminalSignature": term["signature"],
-            "terminalSlot": term["slot"],
-            "terminalLifecycle": term["lifecycle"],
-            "slotDelta": delta,
-            "openUnknown16": u,
-            "deltaMinusUnknown16": (delta - u) if isinstance(u, int) else None,
-            "openSideByte": op.get("sideByte"),
-            "openSlippageBps": op.get("slippageBps"),
-            "openInputAmount": op.get("inputAmount"),
-            "openQuotedOutAmount": op.get("quotedOutAmount"),
+            "userOrder": term["userOrder"], "openSignature": op["signature"],
+            "openSlot": op["slot"], "terminalSignature": term["signature"],
+            "terminalSlot": term["slot"], "terminalLifecycle": term["lifecycle"],
+            "slotDelta": delta, "openUnknown16": unknown,
+            "deltaMinusUnknown16": delta - unknown if isinstance(unknown, int) else None
         })
-
-    exact_or_near = [
-        m for m in matches
-        if isinstance(m.get("deltaMinusUnknown16"), int) and abs(m["deltaMinusUnknown16"]) <= 3
-    ]
     return {
-        "program": PREDICTION_PROGRAM,
-        "signaturesFetched": len(sigs),
-        "historyExhausted": exhausted,
-        "transactionsDecoded": tx_count,
-        "rpcErrors": failures,
-        "nullTransactions": nulls,
-        "scanElapsedSeconds": round(time.monotonic()-started, 1),
-        "opensFound": len(opens_by_order),
-        "terminalsFound": len(terminals),
-        "matchedOpenTerminalPairs": len(matches),
-        "nearExpiryBoundaryMatches": len(exact_or_near),
-        "matches": matches,
+        "program": PREDICTION_PROGRAM, "knownOpenSelfTest": {"events": known_ev, "opens": known_op},
+        "marketSignatureCounts": market_counts, "uniqueCandidateSignatures": len(candidates),
+        "transactionsDecoded": tx_count, "rpcErrors": failures, "nullTransactions": nulls,
+        "programInstructionCount": program_ix_count, "lifecycleEventCounts": lifecycle_counts,
+        "opensFound": len(opens_by_order), "opensWithoutPayload": opens_without_payload,
+        "terminalsFound": len(terminals), "matchedOpenTerminalPairs": len(matches),
+        "nearExpiryBoundaryMatches": sum(1 for x in matches if x["deltaMinusUnknown16"] is not None and abs(x["deltaMinusUnknown16"]) <= 3),
+        "matches": matches, "scanElapsedSeconds": round(time.monotonic()-started, 1)
     }
 
 
