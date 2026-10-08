@@ -40,6 +40,7 @@ jobs:
           cargo test --test slot1_owner -- --nocapture
           cargo test --test token_authority -- --nocapture
           cargo test --test direct_control -- --nocapture
+          cargo test --test matrix -- --nocapture
       - name: Upload executable identity and test inputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -51,4 +52,5 @@ jobs:
             reports/predic-cpi/historical-rpc.json
             reports/predic-cpi/account-census.json
             predic-cpi-runtime-smoke/tests/fixtures/live_accounts.json
+            predic-cpi-runtime-smoke/tests/fixtures/historical_open.hex
           if-no-files-found: warn
