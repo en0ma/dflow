@@ -30,5 +30,6 @@ matching=[d for d in data_candidates if len(d)==80 and int.from_bytes(d[:8],"lit
 if len(matching)!=1:raise RuntimeError("Exactly one historical OPEN payload required")
 out["historical_open_hex"]=matching[0].hex()
 p.write_text(json.dumps(out,indent=2))
+(p.parent/"historical_open.hex").write_text(out["historical_open_hex"])
 print("Recorded live account records for",sum(x["value"] is not None for x in out["accounts"]),"of",len(addresses),"positions")
 print("Index 1 and 4 may be closed; do not treat these as historical snapshots")
