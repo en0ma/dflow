@@ -750,6 +750,161 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+
+PREDICTION_PROGRAM = "pReDicTmksnPfkfiz33ndSdbe2dY43KYPg4U2dbvHvb"
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+def _b58decode(s: str) -> bytes:
+    n = 0
+    for ch in s:
+        n = n * 58 + _B58.index(ch)
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
+    return b"\x00" * (len(s) - len(s.lstrip("1"))) + raw
+
+def _raw_ix_bytes(ix: dict[str, Any]) -> bytes | None:
+    data = ix.get("data")
+    if not isinstance(data, str):
+        return None
+    try:
+        return _b58decode(data)
+    except Exception:
+        return None
+
+def _all_raw_ixs(tx: dict[str, Any]) -> list[dict[str, Any]]:
+    msg = tx.get("transaction", {}).get("message", {}) or {}
+    out = list(msg.get("instructions") or [])
+    for group in (tx.get("meta", {}).get("innerInstructions") or []):
+        out.extend(group.get("instructions") or [])
+    return out
+
+def _pubkey_b58(raw32: bytes) -> str:
+    n = int.from_bytes(raw32, "big")
+    out = ""
+    while n:
+        n, r = divmod(n, 58)
+        out = _B58[r] + out
+    pad = len(raw32) - len(raw32.lstrip(b"\x00"))
+    return "1" * pad + (out or "")
+
+def parse_user_order_events(tx: dict[str, Any]) -> list[dict[str, Any]]:
+    events = []
+    for ix in _all_raw_ixs(tx):
+        if ix.get("programId") != PREDICTION_PROGRAM:
+            continue
+        b = _raw_ix_bytes(ix)
+        if not b or len(b) < 48:
+            continue
+        # pReDic stable EmitEvent envelope: u64=240, event type byte8=2 (UserOrder).
+        if int.from_bytes(b[:8], "little") != 240 or b[8] != 2:
+            continue
+        events.append({
+            "lifecycle": b[9],
+            "slippageBps": int.from_bytes(b[10:12], "little"),
+            "userOrder": _pubkey_b58(b[16:48]),
+            "dataLen": len(b),
+            "dataHex": b.hex(),
+        })
+    return events
+
+def parse_open_unknown16(tx: dict[str, Any]) -> list[dict[str, Any]]:
+    opens = []
+    for ix in _all_raw_ixs(tx):
+        if ix.get("programId") != PREDICTION_PROGRAM:
+            continue
+        b = _raw_ix_bytes(ix)
+        if not b or len(b) != 80:
+            continue
+        if int.from_bytes(b[:8], "little") != 64:
+            continue
+        opens.append({
+            "unknown16": int.from_bytes(b[22:24], "little"),
+            "sideByte": b[16],
+            "slippageBps": int.from_bytes(b[18:20], "little"),
+            "inputAmount": int.from_bytes(b[24:32], "little"),
+            "quotedOutAmount": int.from_bytes(b[32:40], "little"),
+            "dataHex": b.hex(),
+        })
+    return opens
+
+def scan_order_lifecycle_expiry(rpc: Rpc, max_pages: int = 3) -> dict[str, Any]:
+    sigs, exhausted = signatures_for_address(rpc, PREDICTION_PROGRAM, max_pages)
+    opens_by_order: dict[str, dict[str, Any]] = {}
+    terminals: list[dict[str, Any]] = []
+    tx_count = 0
+
+    # Process oldest -> newest so lifecycle ordering is natural.
+    for meta in reversed(sigs):
+        sig = meta.get("signature")
+        if not sig:
+            continue
+        try:
+            tx = get_transaction_raw(rpc, sig)
+        except Exception:
+            continue
+        if not tx:
+            continue
+        tx_count += 1
+        slot = tx.get("slot")
+        events = parse_user_order_events(tx)
+        if not events:
+            continue
+        open_payloads = parse_open_unknown16(tx)
+
+        for ev in events:
+            row = {
+                "signature": sig,
+                "slot": slot,
+                "blockTime": tx.get("blockTime"),
+                **ev,
+            }
+            if ev["lifecycle"] == 1:
+                # A normal open tx should have exactly one pReDic tag-64 payload.
+                if open_payloads:
+                    row.update(open_payloads[0])
+                opens_by_order[ev["userOrder"]] = row
+            elif ev["lifecycle"] in (3, 4):
+                terminals.append(row)
+
+    matches = []
+    for term in terminals:
+        op = opens_by_order.get(term["userOrder"])
+        if not op or not isinstance(op.get("slot"), int) or not isinstance(term.get("slot"), int):
+            continue
+        delta = term["slot"] - op["slot"]
+        u = op.get("unknown16")
+        matches.append({
+            "userOrder": term["userOrder"],
+            "openSignature": op["signature"],
+            "openSlot": op["slot"],
+            "terminalSignature": term["signature"],
+            "terminalSlot": term["slot"],
+            "terminalLifecycle": term["lifecycle"],
+            "slotDelta": delta,
+            "openUnknown16": u,
+            "deltaMinusUnknown16": (delta - u) if isinstance(u, int) else None,
+            "openSideByte": op.get("sideByte"),
+            "openSlippageBps": op.get("slippageBps"),
+            "openInputAmount": op.get("inputAmount"),
+            "openQuotedOutAmount": op.get("quotedOutAmount"),
+        })
+
+    exact_or_near = [
+        m for m in matches
+        if isinstance(m.get("deltaMinusUnknown16"), int) and abs(m["deltaMinusUnknown16"]) <= 3
+    ]
+    return {
+        "program": PREDICTION_PROGRAM,
+        "signaturesFetched": len(sigs),
+        "historyExhausted": exhausted,
+        "transactionsDecoded": tx_count,
+        "opensFound": len(opens_by_order),
+        "terminalsFound": len(terminals),
+        "matchedOpenTerminalPairs": len(matches),
+        "nearExpiryBoundaryMatches": len(exact_or_near),
+        "matches": matches,
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--targets", default="targets.json")
@@ -924,6 +1079,13 @@ def main() -> int:
     except Exception as exc:
         mutation_simulations["vault_swap_to_user_usdc_account"] = {"error": str(exc)}
 
+    lifecycle_expiry = {}
+    try:
+        print("Scanning pReDic order lifecycle events for expiry correlation", flush=True)
+        lifecycle_expiry = scan_order_lifecycle_expiry(rpc, max_pages=3)
+    except Exception as exc:
+        lifecycle_expiry = {"error": str(exc)}
+
     report = {
         "rpcDisplay": "SOLANA_RPC_URL" if (os.getenv("SOLANA_RPC_URL") or "").strip() else "public mainnet-beta RPC",
         "targets": targets,
@@ -931,6 +1093,7 @@ def main() -> int:
         "openOrderCandidates": open_candidates,
         "initializedMarketOrders": initialized_market_orders,
         "mutationSimulations": mutation_simulations,
+        "lifecycleExpiry": lifecycle_expiry,
     }
     (out_dir / "wire-transactions.json").write_text(json.dumps(wire_dumps, indent=2, sort_keys=False))
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
