@@ -43,6 +43,7 @@ jobs:
           cargo test --test token_authority -- --nocapture
           cargo test --test direct_control -- --nocapture
           cargo test --test matrix -- --nocapture
+          cargo test --test historical_pda -- --nocapture
       - name: Upload executable identity and test inputs
         uses: actions/upload-artifact@v4
         if: always()
