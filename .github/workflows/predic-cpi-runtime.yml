@@ -26,6 +26,7 @@ jobs:
           python3 predic-cpi-probe/export_live_fixtures.py
           python3 predic-cpi-probe/fixture_coherence.py
           python3 predic-cpi-probe/market_prerequisites.py
+          python3 predic-cpi-probe/candidate_market_census.py
       - name: Stage pReDic deployed ELF for program-test
         shell: bash
         run: |
@@ -57,6 +58,7 @@ jobs:
             reports/predic-cpi/historical-construction.json
             reports/predic-cpi/fixture-coherence.json
             reports/predic-cpi/current-market-prerequisites.json
+            reports/predic-cpi/candidate-market-census.json
             reports/predic-cpi/account-census.json
             predic-cpi-runtime-smoke/tests/fixtures/live_accounts.json
             predic-cpi-runtime-smoke/tests/fixtures/historical_open.hex
