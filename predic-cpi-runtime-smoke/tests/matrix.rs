@@ -21,7 +21,7 @@ async fn batch_open_diagnostics() {
  let raw=fs::read_to_string("tests/fixtures/live_accounts.json").expect("CI must export live fixture");
  let snapshot:Snapshot=serde_json::from_str(&raw).unwrap();
  assert_eq!(snapshot.accounts.len(),12);
- for payload_kind in 0..2 {
+ for payload_kind in 0..3 {
  for account1_owner in 0..5 {
  for token_authority in 0..2 {
  for invoke_directly in 0..2 {
@@ -31,7 +31,12 @@ async fn batch_open_diagnostics() {
  test.set_compute_max_units(1_000_000);
  let wallet=Keypair::new();
  let market=Pubkey::from_str(&snapshot.accounts[2].address).unwrap();
- let nonce=123456789u64;
+ let historical_bytes=hex::decode(fs::read_to_string("tests/fixtures/historical_open.hex").expect("historical fixture missing").trim()).unwrap();
+ assert_eq!(historical_bytes.len(),80);
+ let historical_nonce=u64::from_le_bytes(historical_bytes[8..16].try_into().unwrap());
+ // payload_kind 2 retains the exact historical bytes and nonce; kind 1 keeps its
+ // prior synthetic-nonce substitution for controlled comparison.
+ let nonce=if payload_kind==2 {historical_nonce} else {123456789u64};
  let order=Pubkey::find_program_address(&[b"userOrderEscrow",wallet.pubkey().as_ref(),market.as_ref(),&nonce.to_le_bytes()],&PREDIC).0;
  let mut keys=Vec::new();
  for entry in &snapshot.accounts{
@@ -59,13 +64,13 @@ async fn batch_open_diagnostics() {
  let mut ctx=test.start_with_context().await;
  let mut data=[0u8;80];data[..8].copy_from_slice(&64u64.to_le_bytes());
  data[8..16].copy_from_slice(&nonce.to_le_bytes());data[16]=b'Y';
- if payload_kind==1 {
+ if payload_kind>=1 {
   let hex_value=fs::read_to_string("tests/fixtures/historical_open.hex").expect("historical fixture missing");
   let bytes=hex::decode(hex_value.trim()).unwrap();
   assert_eq!(bytes.len(),80);
   data.copy_from_slice(&bytes);
   // keep test wallet/order consistent with the payload's historical nonce
-  data[8..16].copy_from_slice(&nonce.to_le_bytes());
+  if payload_kind==1 {data[8..16].copy_from_slice(&nonce.to_le_bytes());}
  }
  let metas=keys.iter().enumerate().map(|(i,k)|
   if [3,4,6,7,8,9].contains(&i){AccountMeta::new(*k,[7,8,9].contains(&i))}
@@ -75,8 +80,8 @@ async fn batch_open_diagnostics() {
  let tx=Transaction::new_signed_with_payer(&[ix],Some(&ctx.payer.pubkey()),
   &[&ctx.payer,&wallet],ctx.last_blockhash);
  let result=ctx.banks_client.process_transaction(tx).await;
- println!("MATRIX payload={} account1={} token_owner={} direct={} outcome={:?}",
-  payload_kind,account1_owner,token_authority,invoke_directly,result);
+ println!("MATRIX payload={} nonce={} account1={} token_owner={} direct={} outcome={:?}",
+  payload_kind,nonce,account1_owner,token_authority,invoke_directly,result);
  if result.is_ok(){
   let order_state=ctx.banks_client.get_account(order).await.unwrap();
   println!("POTENTIAL_OPEN_SUCCESS payload={} account1={} token_owner={} direct={} order_exists={} order_len={}",payload_kind,account1_owner,token_authority,invoke_directly,order_state.is_some(),order_state.as_ref().map(|a|a.data.len()).unwrap_or(0));
