@@ -1,0 +1,65 @@
+name: pReDic experimental CPI runtime
+on:
+  pull_request:
+    paths:
+      - 'predic-cpi-runtime-smoke/**'
+      - '.github/workflows/predic-cpi-runtime.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Recover deployed ELF (read-only RPC)
+        run: python3 program_dump.py
+      - name: Inspect real OPEN account owners and layouts
+        run: |
+          python3 predic-cpi-probe/historical_rpc.py
+          python3 predic-cpi-probe/historical_construction.py
+          python3 predic-cpi-probe/account_census.py
+          python3 predic-cpi-probe/export_live_fixtures.py
+          python3 predic-cpi-probe/fixture_coherence.py
+          python3 predic-cpi-probe/market_prerequisites.py
+          python3 predic-cpi-probe/candidate_market_census.py
+      - name: Stage pReDic deployed ELF for program-test
+        shell: bash
+        run: |
+          mkdir -p predic-cpi-runtime-smoke/tests/fixtures
+          cp reports/program/predictions.so predic-cpi-runtime-smoke/tests/fixtures/predictions.so
+      - name: Attempt native-to-deployed-sBPF CPI dispatch
+        working-directory: predic-cpi-runtime-smoke
+        env:
+          RUST_BACKTRACE: '1'
+          BPF_OUT_DIR: ${{ github.workspace }}/predic-cpi-runtime-smoke/tests/fixtures
+        run: |
+          cargo test --test dispatch -- --nocapture
+          cargo test --test accounts -- --nocapture
+          cargo test --test live_owners -- --nocapture
+          cargo test --test slot1_owner -- --nocapture
+          cargo test --test token_authority -- --nocapture
+          cargo test --test direct_control -- --nocapture
+          cargo test --test matrix -- --nocapture
+          cargo test --test historical_pda -- --nocapture
+      - name: Upload executable identity and test inputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-runtime-${{ github.run_id }}
+          path: |
+            reports/program/info.json
+            reports/program/predictions.so
+            reports/predic-cpi/historical-rpc.json
+            reports/predic-cpi/historical-construction.json
+            reports/predic-cpi/fixture-coherence.json
+            reports/predic-cpi/current-market-prerequisites.json
+            reports/predic-cpi/candidate-market-census.json
+            reports/predic-cpi/account-census.json
+            predic-cpi-runtime-smoke/tests/fixtures/live_accounts.json
+            predic-cpi-runtime-smoke/tests/fixtures/historical_open.hex
+          if-no-files-found: warn

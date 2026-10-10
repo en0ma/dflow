@@ -1,0 +1,71 @@
+name: pReDic CPI research preflight
+on:
+  workflow_dispatch:
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Compile and test OPEN encoder and PDA derivation helper
+        working-directory: predic-cpi-probe
+        run: |
+          cargo test
+          cargo check
+      - name: Confirm RPC access without printing credentials
+        shell: bash
+        run: |
+          if [ -z "$SOLANA_RPC_URL" ]; then
+            echo "SOLANA_RPC_URL: not configured"; exit 1
+          fi
+          echo "SOLANA_RPC_URL: configured"
+          python3 - <<'PY'
+          import json,os,urllib.request
+          req=urllib.request.Request(
+              os.environ["SOLANA_RPC_URL"],
+              data=json.dumps({"jsonrpc":"2.0","id":1,"method":"getVersion"}).encode(),
+              headers={"Content-Type":"application/json"},
+              method="POST")
+          try:
+              with urllib.request.urlopen(req,timeout=20) as resp:
+                  j=json.load(resp)
+              assert isinstance(j.get("result"),dict), "RPC response has no version result"
+              print("RPC getVersion: OK")
+          except Exception as e:
+              print("RPC getVersion: failed; error class:",type(e).__name__)
+              raise
+          PY
+      - name: Verify historical OPEN instructions over RPC
+        run: python3 predic-cpi-probe/historical_rpc.py
+      - name: Upload reproducible historical verification
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-cpi-historical-${{ github.run_id }}
+          path: reports/predic-cpi/
+          if-no-files-found: warn
+      - name: Recover deployed pReDic ELF from RPC
+        run: python3 program_dump.py
+      - name: Verify ELF identity and deployment metadata
+        run: python3 predic-cpi-probe/verify_elf.py
+      - name: Upload runtime input ELF and manifest
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predic-cpi-runtime-inputs-${{ github.run_id }}
+          path: |
+            reports/program/predictions.so
+            reports/program/info.json
+            reports/predic-cpi/elf-verification.json
+          if-no-files-found: warn
+      - name: Clarify execution gate
+        run: |
+          echo "PASS means: Rust ABI encoder compiles, tests pass, RPC is reachable."
+          echo "It does NOT mean: external CPI succeeded."
+          echo "Real runtime CPI requires valid OPEN account fixtures, mint balances and a loader for the deployed ELF."
